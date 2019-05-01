@@ -1,5 +1,7 @@
 package random.snes.fe4.loader;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -12,7 +14,8 @@ import util.recordkeeper.RecordKeeper;
 
 public class ClassDataLoader {
 	
-	private Map<FE4Data.CharacterClass, FE4Class> classMap;
+	private Map<FE4Data.CharacterClass, FE4Class> classMap = new HashMap<FE4Data.CharacterClass, FE4Class>();
+	private List<FE4Class> validClasses = new ArrayList<FE4Class>();
 	
 	public static final String RecordKeeperCategoryKey = "Classes";
 	
@@ -29,8 +32,21 @@ public class ClassDataLoader {
 			byte[] classData = handler.readBytesAtOffset(address, FE4Data.ClassTableItemSize);
 			FE4Class classObject = new FE4Class(classData, address);
 			FE4Data.CharacterClass fe4CharClass = FE4Data.CharacterClass.valueOf(i);
+			if (fe4CharClass == null) { continue; }
 			classMap.put(fe4CharClass, classObject);
+			if (FE4Data.CharacterClass.unpromotedClasses.contains(fe4CharClass) || FE4Data.CharacterClass.promotedClasses.contains(fe4CharClass)) {
+				validClasses.add(classObject);
+			}
 		}
+	}
+	
+	public List<FE4Class> allValidClasses() {
+		return new ArrayList<FE4Class>(validClasses);
+	}
+	
+	public FE4Class classForID(int classID) {
+		FE4Data.CharacterClass fe4Class = FE4Data.CharacterClass.valueOf(classID);
+		return classMap.get(fe4Class);
 	}
 	
 	public void commit() {
@@ -82,6 +98,17 @@ public class ClassDataLoader {
 		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Base SPD", Integer.toString(classObject.getBaseSPD()));
 		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Base DEF", Integer.toString(classObject.getBaseDEF()));
 		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Base RES", Integer.toString(classObject.getBaseRES()));
+		
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Sword Rank", classObject.getSwordRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Lance Rank", classObject.getLanceRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Axe Rank", classObject.getAxeRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Bow Rank", classObject.getBowRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Fire Rank", classObject.getFireRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Thunder Rank", classObject.getThunderRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Wind Rank", classObject.getWindRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Light Rank", classObject.getLightRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Dark Rank", classObject.getDarkRank().displayString());
+		recordData(rk, isInitial, RecordKeeperCategoryKey, name, "Staff Rank", classObject.getStaffRank().displayString());
 		
 		List<FE4Class.ClassSkills> slot1 = classObject.getSlot1ClassSkills();
 		if (slot1.isEmpty()) {

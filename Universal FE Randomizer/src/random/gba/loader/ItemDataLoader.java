@@ -1,6 +1,5 @@
 package random.gba.loader;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -9,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import fedata.gba.GBAFECharacterData;
 import fedata.gba.GBAFEClassData;
@@ -17,6 +17,7 @@ import fedata.gba.GBAFESpellAnimationCollection;
 import fedata.gba.general.GBAFEClass;
 import fedata.gba.general.GBAFEItem;
 import fedata.gba.general.GBAFEItemProvider;
+import fedata.gba.general.GBAFEItemProvider.WeaponRanks;
 import fedata.gba.general.GBAFEPromotionItem;
 import fedata.gba.general.WeaponRank;
 import fedata.gba.general.WeaponType;
@@ -176,6 +177,18 @@ public class ItemDataLoader {
 		return provider.getHighestWeaponRankValue();
 	}
 	
+	public WeaponRank rankForValue(int value) {
+		return provider.rankWithValue(value);
+	}
+	
+	public WeaponRanks ranksForCharacter(GBAFECharacterData character) {
+		return new WeaponRanks(character, provider);
+	}
+	
+	public WeaponRanks ranksForClass(GBAFEClassData charClass) {
+		return new WeaponRanks(charClass, provider);
+	}
+	
 	public GBAFEItemData[] getAllWeapons() {
 		return feItemsFromItemSet(provider.allWeapons());
 	}
@@ -217,6 +230,14 @@ public class ItemDataLoader {
 		}
 		
 		return null;
+	}
+	
+	public long flierEffectPointer() {
+		if (offsetsForAdditionalData.containsKey(AdditionalData.FLIERS_EFFECT)) {
+			return offsetsForAdditionalData.get(AdditionalData.FLIERS_EFFECT);
+		}
+		
+		return 0;
 	}
 	
 	public long[] possibleEffectivenessAddresses() {
@@ -325,12 +346,12 @@ public class ItemDataLoader {
 		return itemMap.get(weaponArray[rng.nextInt(weapons.size())].getID());
 	}
 	
-	public GBAFEItemData getSidegradeWeapon(GBAFEClassData targetClass, GBAFEItemData originalWeapon, Random rng) {
-		if (!isWeapon(originalWeapon)) {
+	public GBAFEItemData getSidegradeWeapon(GBAFEClassData targetClass, GBAFEItemData originalWeapon, boolean strict, Random rng) {
+		if (!isWeapon(originalWeapon) && originalWeapon.getType() != WeaponType.STAFF) {
 			return null;
 		}
 		
-		Set<GBAFEItem> potentialItems = provider.comparableWeaponsForClass(targetClass.getID(), originalWeapon);
+		Set<GBAFEItem> potentialItems = provider.comparableWeaponsForClass(targetClass.getID(), new WeaponRanks(targetClass, provider), originalWeapon, strict);
 		if (potentialItems.isEmpty()) { 
 			potentialItems = provider.basicWeaponsForClass(targetClass.getID());
 			
@@ -339,9 +360,26 @@ public class ItemDataLoader {
 			}
 		}
 		
-		GBAFEItem[] itemsArray = potentialItems.toArray(new GBAFEItem[potentialItems.size()]);
-		int index = rng.nextInt(potentialItems.size());
-		return itemMap.get(itemsArray[index].getID());
+		List<GBAFEItem> itemList = potentialItems.stream().sorted(GBAFEItem.defaultComparator()).collect(Collectors.toList());
+		return itemMap.get(itemList.get(rng.nextInt(itemList.size())).getID());
+	}
+	
+	public GBAFEItemData getSidegradeWeapon(GBAFECharacterData character, GBAFEItemData originalWeapon, boolean strict, Random rng) {
+		if (!isWeapon(originalWeapon) && originalWeapon.getType() != WeaponType.STAFF) {
+			return null;
+		}
+		
+		Set<GBAFEItem> potentialItems = provider.comparableWeaponsForClass(character.getClassID(), new WeaponRanks(character, provider), originalWeapon, strict);
+		if (potentialItems.isEmpty()) { 
+			potentialItems = provider.basicWeaponsForClass(character.getClassID());
+			
+			if (potentialItems.isEmpty()) {
+				return null;
+			}
+		}
+		
+		List<GBAFEItem> itemList = potentialItems.stream().sorted(GBAFEItem.defaultComparator()).collect(Collectors.toList());
+		return itemMap.get(itemList.get(rng.nextInt(itemList.size())).getID());
 	}
 	
 	public GBAFEItemData getRandomWeaponForCharacter(GBAFECharacterData character, Boolean ranged, Boolean melee, Random rng) {
@@ -379,6 +417,10 @@ public class ItemDataLoader {
 	
 	public GBAFEItemData[] thiefItemsToRemove() {
 		return feItemsFromItemSet(provider.thiefItemsToRemove());
+	}
+	
+	public GBAFEItemData[] specialItemsToRetain() {
+		return feItemsFromItemSet(provider.specialItemsToRetain());
 	}
 	
 	public GBAFEItemData[] specialInventoryForClass(int classID, Random rng) {
@@ -435,9 +477,9 @@ public class ItemDataLoader {
 	
 	private void recordWeapon(RecordKeeper rk, GBAFEItemData item, Boolean isInitial, ClassDataLoader classData, TextLoader textData, FileHandler handler) {
 		int nameIndex = item.getNameIndex();
-		String name = textData.getStringAtIndex(nameIndex).trim();
+		String name = textData.getStringAtIndex(nameIndex, true).trim();
 		int descriptionIndex = item.getDescriptionIndex();
-		String description = textData.getStringAtIndex(descriptionIndex).trim();
+		String description = textData.getStringAtIndex(descriptionIndex, true).trim();
 		
 		if (isInitial) {
 			rk.recordOriginalEntry(RecordKeeperCategoryWeaponKey, name, "Description", description);
@@ -473,28 +515,23 @@ public class ItemDataLoader {
 			if (effectiveClasses != 0) {
 				effectiveClasses -= 0x8000000;
 				if (handler != null) {
-					try {
-						handler.setNextReadOffset(effectiveClasses);
-						byte[] classes = handler.continueReadingBytesUpToNextTerminator(effectiveClasses + 100);
-						List<String> classList = new ArrayList<String>();
-						for (byte classID : classes) {
-							if (classID == 0) { break; }
-							GBAFEClassData classObject = classData.classForID(classID);
-							if (classObject == null) {
-								classList.add("Unknown (0x" + Integer.toHexString(classID).toUpperCase() + ")");
+					handler.setNextReadOffset(effectiveClasses);
+					byte[] classes = handler.continueReadingBytesUpToNextTerminator(effectiveClasses + 100);
+					List<String> classList = new ArrayList<String>();
+					for (byte classID : classes) {
+						if (classID == 0) { break; }
+						GBAFEClassData classObject = classData.classForID(classID);
+						if (classObject == null) {
+							classList.add("Unknown (0x" + Integer.toHexString(classID).toUpperCase() + ")");
+						} else {
+							if (classData.isFemale(classID)) {
+								classList.add(textData.getStringAtIndex(classObject.getNameIndex(), true).trim() + " (F)");
 							} else {
-								if (classData.isFemale(classID)) {
-									classList.add(textData.getStringAtIndex(classObject.getNameIndex()).trim() + " (F)");
-								} else {
-									classList.add(textData.getStringAtIndex(classObject.getNameIndex()).trim());
-								}
+								classList.add(textData.getStringAtIndex(classObject.getNameIndex(), true).trim());
 							}
 						}
-						rk.recordOriginalEntry(RecordKeeperCategoryWeaponKey, name, "Effectiveness", String.join("<br>", classList));
-					} catch (IOException e) {
-						e.printStackTrace();
-						rk.recordOriginalEntry(RecordKeeperCategoryWeaponKey, name, "Effectiveness", "Error");
 					}
+					rk.recordOriginalEntry(RecordKeeperCategoryWeaponKey, name, "Effectiveness", String.join("<br>", classList));
 				} else {
 					rk.recordOriginalEntry(RecordKeeperCategoryWeaponKey, name, "Effectiveness", "No input handler.");
 				}
@@ -554,30 +591,24 @@ public class ItemDataLoader {
 			if (effectiveClasses != 0) {
 				effectiveClasses -= 0x8000000;
 				if (handler != null) {
-					try {
-						handler.setNextReadOffset(effectiveClasses);
-						byte[] classes = handler.continueReadingBytesUpToNextTerminator(effectiveClasses + 100);
-						List<String> classList = new ArrayList<String>();
-						for (byte classID : classes) {
-							if (classID == 0) { break; }
-							GBAFEClassData classObject = classData.classForID(classID);
-							if (classObject == null) {
-								classList.add("Unknown (0x" + Integer.toHexString(classID).toUpperCase() + ")");
+					handler.setNextReadOffset(effectiveClasses);
+					byte[] classes = handler.continueReadingBytesUpToNextTerminator(effectiveClasses + 100);
+					List<String> classList = new ArrayList<String>();
+					for (byte classID : classes) {
+						if (classID == 0) { break; }
+						GBAFEClassData classObject = classData.classForID(classID);
+						if (classObject == null) {
+							classList.add("Unknown (0x" + Integer.toHexString(classID).toUpperCase() + ")");
+						} else {
+							if (classData.isFemale(classID)) {
+								classList.add(textData.getStringAtIndex(classObject.getNameIndex(), true).trim() + " (F)");
 							} else {
-								if (classData.isFemale(classID)) {
-									classList.add(textData.getStringAtIndex(classObject.getNameIndex()).trim() + " (F)");
-								} else {
-									classList.add(textData.getStringAtIndex(classObject.getNameIndex()).trim());
-								}
+								classList.add(textData.getStringAtIndex(classObject.getNameIndex(), true).trim());
 							}
 						}
-						rk.recordUpdatedEntry(RecordKeeperCategoryWeaponKey, name, "Effectiveness", String.join("<br>", classList));
-					} catch (IOException e) {
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-						rk.recordUpdatedEntry(RecordKeeperCategoryWeaponKey, name, "Effectiveness", "Error");
 					}
-				} else {
+					rk.recordUpdatedEntry(RecordKeeperCategoryWeaponKey, name, "Effectiveness", String.join("<br>", classList));
+				}  else {
 					rk.recordUpdatedEntry(RecordKeeperCategoryWeaponKey, name, "Effectiveness", "No output handler.");
 				}
 			} else {

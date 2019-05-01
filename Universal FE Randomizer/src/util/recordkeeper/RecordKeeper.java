@@ -18,10 +18,13 @@ public class RecordKeeper {
 		Map<String, String> originalValues;
 		Map<String, String> updatedValues; 
 		
+		Map<String, String> additionalInfo;
+		
 		private Entry() {
 			allKeys = new ArrayList<String>();
 			originalValues = new HashMap<String, String>();
 			updatedValues = new HashMap<String, String>();
+			additionalInfo = new HashMap<String, String>();
 		}
 	}
 	
@@ -51,6 +54,8 @@ public class RecordKeeper {
 	private List<String> allCategories;
 	private Map<String, EntryMap> entriesByCategory;
 	
+	private List<String> notes;
+	
 	public RecordKeeper(String title) {
 		allCategories = new ArrayList<String>();
 		entriesByCategory = new HashMap<String, EntryMap>();
@@ -59,12 +64,18 @@ public class RecordKeeper {
 		
 		header.keyList = new ArrayList<String>();
 		header.values = new HashMap<String, String>();
+		
+		notes = new ArrayList<String>();
 	}
 	
 	public void addHeaderItem(String title, String value) {
 		if (header.keyList.contains(title)) { header.keyList.remove(title); }
 		header.keyList.add(title);
 		header.values.put(title, value);
+	}
+	
+	public void addNote(String note) {
+		notes.add(note);
 	}
 	
 	public void registerCategory(String category) {
@@ -75,6 +86,24 @@ public class RecordKeeper {
 		EntryMap map = new EntryMap();
 		entriesByCategory.put(category, map);
 		allCategories.add(category);
+	}
+	
+	public void setAdditionalInfo(String category, String entryKey, String key, String info) {
+		EntryMap entryMap = entriesByCategory.get(category);
+		if (entryMap == null) { return; }
+		Entry entry = entryMap.entriesByKey.get(entryKey);
+		if (entry == null) { return; }
+		
+		entry.additionalInfo.put(key, info);
+	}
+	
+	public void clearAdditionalInfo(String category, String entryKey, String key) {
+		EntryMap entryMap = entriesByCategory.get(category);
+		if (entryMap == null) { return; }
+		Entry entry = entryMap.entriesByKey.get(entryKey);
+		if (entry == null) { return; }
+		
+		entry.additionalInfo.remove(key);
 	}
 
 	public void recordOriginalEntry(String category, String entryKey, String key, String originalValue) {
@@ -142,6 +171,7 @@ public class RecordKeeper {
 			OutputStreamWriter writer = new OutputStreamWriter(new FileOutputStream(outputPath), Charset.forName("UTF-8").newEncoder());
 			writer.write("<html><meta http-equiv=\"Content-Type\" content = \"text/html; charset=utf-8\" /><head><style>\n");
 			writer.write("table, th, td {\n\tborder: 1px solid black;\n}\n");
+			writer.write(".notes {\n\twidth: 66%;\n\tmargin: auto;\n}\n");
 			writer.write("</style></head><body>\n");
 			writer.write("<center><h1><p>Changelog for " + header.title + "</p></h1><br>\n");
 			writer.write("<hr>\n");
@@ -152,6 +182,15 @@ public class RecordKeeper {
 			}
 			writer.write("</table>\n");
 			writer.write("<br><hr><br>\n");
+			
+			if (!notes.isEmpty()) {
+				writer.write("<h2>Notes</h2><br>\n</center>\n");
+				writer.write("<div class=\"notes\"><ul>");
+				for (String note : notes) {
+					writer.write("<li>" + note + "</li>\n");
+				}
+				writer.write("</ul></div>\n<center>\n<br><hr><br>\n");
+			}
 			
 			for (String category : allCategories) {
 				writer.write("<h2 id=\"" + keyFromString(category) + "\">" + category + "</h2>");
@@ -177,10 +216,16 @@ public class RecordKeeper {
 					Entry entry = entries.entriesByKey.get(entryKey);
 					writer.write("<h3 id=\"" + keyFromString(entryKey) + "\">" + entryKey + "</h3><br>\n");
 					writer.write("<table>\n");
+					boolean hasAdditionalInfo = !entry.additionalInfo.isEmpty();
 					for (String key : entry.allKeys) {
 						String oldValue = entry.originalValues.get(key);
 						String newValue = entry.updatedValues.get(key);
-						writer.write("<tr><td>" + key + "</td><td>" + (oldValue != null ? oldValue : "(null)") + "</td><td>" + (newValue != null ? newValue : "(null)") + "</td></tr>\n");
+						writer.write("<tr><td>" + key + "</td><td>" + (oldValue != null ? oldValue : "(null)") + "</td><td>" + (newValue != null ? newValue : "(null)") + "</td>");
+						if (hasAdditionalInfo) {
+							boolean hasInfoForKey = entry.additionalInfo.containsKey(key);
+							writer.write("<td>" + (hasInfoForKey ? entry.additionalInfo.get(key) : "") + "</td>");
+						}
+						writer.write("</tr>\n");
 					}
 					writer.write("</table>\n");
 					writer.write("<a href=\"#" + keyFromString(category) + "\">Back to " + category + "</a>\n");

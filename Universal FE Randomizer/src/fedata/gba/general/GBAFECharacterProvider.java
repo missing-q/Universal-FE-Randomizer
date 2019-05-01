@@ -15,8 +15,21 @@ public interface GBAFECharacterProvider {
 	public Map<Integer, GBAFECharacter> counters();
 	
 	public Set<GBAFECharacter> allPlayableCharacters();
+	public Set<GBAFECharacter> extraCharacters();
 	public Set<GBAFECharacter> allBossCharacters();
 	public Set<GBAFECharacter> linkedCharacters(int characterID);
+	
+	public int appearanceChapter(int characterID);
+	public int chapterCount();
+	
+	public Set<GBAFECharacter> charactersExcludedFromRandomRecruitment();
+	
+	public Set<Integer> linkedPortraitIDs(int characterID);
+	
+	public Set<GBAFECharacter> allFliers();
+	public Set<GBAFECharacter> mustAttack();
+	public Set<GBAFECharacter> femaleSet();
+	public Set<GBAFECharacter> mustPromote();
 	
 	public GBAFECharacter characterWithID(int characterID);
 	

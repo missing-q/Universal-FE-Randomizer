@@ -2,6 +2,7 @@ package random.snes.fe4.randomizer;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
@@ -10,20 +11,29 @@ import java.util.Set;
 import fedata.snes.fe4.FE4Data;
 import fedata.snes.fe4.FE4HolyBlood;
 import fedata.snes.fe4.FE4StaticCharacter;
+import fedata.snes.fe4.FE4Data.HolyBloodSlot1;
+import fedata.snes.fe4.FE4Data.HolyBloodSlot2;
+import fedata.snes.fe4.FE4Data.HolyBloodSlot3;
+import random.general.WeightedDistributor;
 import random.snes.fe4.loader.CharacterDataLoader;
 import random.snes.fe4.loader.HolyBloodLoader;
 import random.snes.fe4.loader.ItemMapper;
+import ui.fe4.HolyBloodOptions;
+import ui.fe4.HolyBloodOptions.STRMAGOptions;
 
 public class FE4BloodRandomizer {
 	
 	static final int rngSalt = 12321;
 	
-	public static void randomizeHolyBloodGrowthBonuses(int growthBonusTotal, HolyBloodLoader bloodData, Random rng) {
+	public static void randomizeHolyBloodGrowthBonuses(HolyBloodOptions options, HolyBloodLoader bloodData, Random rng) {
 		List<FE4HolyBlood> bloodList = bloodData.allHolyBlood();
+		Set<Integer> generatedHashes = new HashSet<Integer>();
+		
 		for (FE4HolyBlood blood : bloodList) {
-			int growthRemaining = growthBonusTotal;
+			int growthRemaining = options.growthTotal;
+			growthRemaining -= options.hpBaseline;
 			
-			int hpBonus = 0;
+			int hpBonus = options.hpBaseline;
 			int strBonus = 0;
 			int magBonus = 0;
 			int sklBonus = 0;
@@ -32,17 +42,35 @@ public class FE4BloodRandomizer {
 			int defBonus = 0;
 			int resBonus = 0;
 			
+			boolean reducedHPChance = options.hpBaseline > 0;
+			
+			WeightedDistributor<Integer> distributor = new WeightedDistributor<Integer>();
+			if (reducedHPChance) { distributor.addItem(0, 1); }
+			else { distributor.addItem(0, 3); }
+			distributor.addItem(1, 3);
+			distributor.addItem(2, 3);
+			distributor.addItem(3, 3);
+			distributor.addItem(4, 3);
+			distributor.addItem(5, 3);
+			distributor.addItem(6, 3);
+			
 			while (growthRemaining > 0) {
-				int amount = 5;
-				growthRemaining -= 5;
-				int field = rng.nextInt(7);
+				int amount = Math.min(growthRemaining, options.chunkSize);
+				growthRemaining -= amount;
+				int field = distributor.getRandomItem(rng);
+				
 				switch (field) {
 				case 0:
 					hpBonus += amount;
 					break;
 				case 1:
-					if (blood.getWeaponType().isPhysical()) { strBonus += amount; }
-					else { magBonus += amount; }
+					if (options.strMagOptions == STRMAGOptions.LIMIT_STR_MAG) {
+						if (blood.getWeaponType().isPhysical()) { strBonus += amount; }
+						else { magBonus += amount; }
+					} else {
+						if (rng.nextInt(2) == 0) { strBonus += amount; }
+						else { magBonus += amount; }
+					}
 					break;
 				case 2:
 					sklBonus += amount;
@@ -60,6 +88,39 @@ public class FE4BloodRandomizer {
 					resBonus += amount;
 					break;
 				}
+				
+				// Lean towards what we've already pulled (up to 50%)
+				if (distributor.chanceOfResult(field) < 0.5) {
+					distributor.addItem(field, 2);
+				}
+				
+				if (growthRemaining <= 0) {
+					if (options.strMagOptions == STRMAGOptions.ADJUST_STR_MAG) {
+						if ((blood.getWeaponType().isPhysical() && strBonus < magBonus) || (!blood.getWeaponType().isPhysical() && strBonus > magBonus)) {
+							int swap = strBonus;
+							strBonus = magBonus;
+							magBonus = swap;
+						}
+					}
+					if (options.generateUniqueBonuses) {
+						// Verify hash to see if we've already generated this combination.
+						int hash = hashValue(reducedHPChance ? 0 : hpBonus, strBonus, magBonus, sklBonus, spdBonus, lckBonus, defBonus, resBonus);
+						if (generatedHashes.contains(hash)) {
+							// Reset
+							growthRemaining = options.growthTotal - options.hpBaseline;
+							hpBonus = options.hpBaseline;
+							strBonus = 0;
+							magBonus = 0;
+							sklBonus = 0;
+							spdBonus = 0;
+							lckBonus = 0;
+							defBonus = 0;
+							resBonus = 0;
+						} else {
+							generatedHashes.add(hash);
+						}
+					}
+				}
 			}
 			
 			blood.setHPGrowthBonus(hpBonus);
@@ -71,6 +132,22 @@ public class FE4BloodRandomizer {
 			blood.setDEFGrowthBonus(defBonus);
 			blood.setRESGrowthBonus(resBonus);
 		}
+	}
+	
+	private static Integer hashValue(int hp, int str, int mag, int skl, int spd, int lck, int def, int res) {
+		List<Integer> stats = Arrays.asList(hp, str, mag, skl, spd, lck, def, res);
+		Collections.sort(stats);
+		
+		int hashValue = stats.indexOf(hp) * (int)Math.pow(10, 0) +
+				stats.indexOf(str) * (int)Math.pow(10, 1) +
+				stats.indexOf(mag) * (int)Math.pow(10, 2) +
+				stats.indexOf(skl) * (int)Math.pow(10, 3) +
+				stats.indexOf(spd) * (int)Math.pow(10, 4) +
+				stats.indexOf(def) * (int)Math.pow(10, 5) +
+				stats.indexOf(res) * (int)Math.pow(10, 6) +
+				stats.indexOf(lck) * (int)Math.pow(10, 7)
+				;
+		return hashValue;
 	}
 
 	public static void randomizeHolyWeaponBonuses(HolyBloodLoader bloodData, Random rng) {
@@ -125,17 +202,33 @@ public class FE4BloodRandomizer {
 		}
 	}
 	
-	public static void assignHolyBlood(int majorBloodChance, int minorBloodChance, boolean matchClass, CharacterDataLoader charData, ItemMapper itemMap, Random rng) {
+	public static void assignHolyBlood(int majorBloodChance, int minorBloodChance, boolean matchClass, CharacterDataLoader charData, HolyBloodLoader bloodData, ItemMapper itemMap, Random rng) {
 		List<FE4StaticCharacter> characterList = new ArrayList<FE4StaticCharacter>(charData.getGen1Characters());
 		characterList.addAll(charData.getGen2CommonCharacters());
 		characterList.addAll(charData.getGen2SubstituteCharacters());
 		
 		Set<Integer> idsProcessed = new HashSet<Integer>();
 		
+		Set<FE4Data.HolyBlood> restrictedBlood = new HashSet<FE4Data.HolyBlood>(); 
+		
+		for (FE4Data.Character uniqueChar : FE4Data.Character.CharactersRequiringUniqueBlood) {
+			FE4StaticCharacter unique = charData.getStaticCharacter(uniqueChar);
+			if (unique == null) { continue; }
+			
+			List<HolyBloodSlot1> restrictedSlot1 = FE4Data.HolyBloodSlot1.slot1HolyBlood(unique.getHolyBlood1Value());
+			List<HolyBloodSlot2> restrictedSlot2 = FE4Data.HolyBloodSlot2.slot2HolyBlood(unique.getHolyBlood2Value());
+			List<HolyBloodSlot3> restrictedSlot3 = FE4Data.HolyBloodSlot3.slot3HolyBlood(unique.getHolyBlood3Value());
+			
+			if (restrictedSlot1.stream().filter(blood -> (blood.isMajor())).findFirst().isPresent()) { restrictedBlood.add(restrictedSlot1.stream().filter(blood -> (blood.isMajor())).findFirst().get().bloodType()); }
+			if (restrictedSlot2.stream().filter(blood -> (blood.isMajor())).findFirst().isPresent()) { restrictedBlood.add(restrictedSlot2.stream().filter(blood -> (blood.isMajor())).findFirst().get().bloodType()); }
+			if (restrictedSlot3.stream().filter(blood -> (blood.isMajor())).findFirst().isPresent()) { restrictedBlood.add(restrictedSlot3.stream().filter(blood -> (blood.isMajor())).findFirst().get().bloodType()); }
+		}
+		
 		for (FE4StaticCharacter staticChar : characterList) {
 			if (idsProcessed.contains(staticChar.getCharacterID())) { continue; }
 			
 			FE4Data.Character fe4Char = FE4Data.Character.valueOf(staticChar.getCharacterID());
+			FE4Data.CharacterClass targetClass = FE4Data.CharacterClass.valueOf(staticChar.getClassID());
 			
 			List<FE4Data.HolyBloodSlot1> slot1Blood = FE4Data.HolyBloodSlot1.slot1HolyBlood(staticChar.getHolyBlood1Value());
 			List<FE4Data.HolyBloodSlot2> slot2Blood = FE4Data.HolyBloodSlot2.slot2HolyBlood(staticChar.getHolyBlood2Value());
@@ -183,6 +276,16 @@ public class FE4BloodRandomizer {
 						slot3Blood.remove(FE4Data.HolyBloodSlot3.blood(minorBloodType, false));
 						slot3Blood.add(slot3);
 					}
+					
+					// Adjust personal growths downwards to compensate.
+					staticChar.setHPGrowth(staticChar.getHPGrowth() - bloodData.holyBloodByType(majorBlood).getHPGrowthBonus());
+					staticChar.setSTRGrowth(staticChar.getSTRGrowth() - bloodData.holyBloodByType(majorBlood).getSTRGrowthBonus());
+					staticChar.setMAGGrowth(staticChar.getMAGGrowth() - bloodData.holyBloodByType(majorBlood).getMAGGrowthBonus());
+					staticChar.setSKLGrowth(staticChar.getSKLGrowth() - bloodData.holyBloodByType(majorBlood).getSKLGrowthBonus());
+					staticChar.setSPDGrowth(staticChar.getSPDGrowth() - bloodData.holyBloodByType(majorBlood).getSPDGrowthBonus());
+					staticChar.setDEFGrowth(staticChar.getDEFGrowth() - bloodData.holyBloodByType(majorBlood).getDEFGrowthBonus());
+					staticChar.setRESGrowth(staticChar.getRESGrowth() - bloodData.holyBloodByType(majorBlood).getRESGrowthBonus());
+					staticChar.setLCKGrowth(staticChar.getLCKGrowth() - bloodData.holyBloodByType(majorBlood).getLCKGrowthBonus());
 				} else {
 					FE4Data.HolyBlood[] bloodChoices = null;
 					if (matchClass) {
@@ -194,9 +297,10 @@ public class FE4BloodRandomizer {
 					
 					Set<FE4Data.HolyBlood> bloodSet = new HashSet<FE4Data.HolyBlood>(Arrays.asList(bloodChoices));
 					bloodSet.retainAll(Arrays.asList(fe4Char.limitedHolyBloodSelection()));
+					bloodSet.remove(FE4Data.HolyBlood.NONE);
 					List<FE4Data.HolyBlood> bloodList = new ArrayList<FE4Data.HolyBlood>(bloodSet);
-					
-					FE4Data.HolyBlood selectedBlood = bloodList.get(rng.nextInt(bloodList.size()));
+					Collections.sort(bloodList, FE4Data.HolyBlood.defaultComparator);
+					FE4Data.HolyBlood selectedBlood = bloodList.isEmpty() ? null : bloodList.get(rng.nextInt(bloodList.size()));
 					
 					FE4Data.HolyBloodSlot1 slot1 = FE4Data.HolyBloodSlot1.blood(selectedBlood, true);
 					FE4Data.HolyBloodSlot2 slot2 = FE4Data.HolyBloodSlot2.blood(selectedBlood, true);
@@ -206,17 +310,30 @@ public class FE4BloodRandomizer {
 					if (slot3 != null) { slot3Blood.add(slot3); }
 					
 					majorBlood = selectedBlood;
+					
+					// Adjust personal growths downwards to compensate.
+					staticChar.setHPGrowth(staticChar.getHPGrowth() - bloodData.holyBloodByType(majorBlood).getHPGrowthBonus() * 2);
+					staticChar.setSTRGrowth(staticChar.getSTRGrowth() - bloodData.holyBloodByType(majorBlood).getSTRGrowthBonus() * 2);
+					staticChar.setMAGGrowth(staticChar.getMAGGrowth() - bloodData.holyBloodByType(majorBlood).getMAGGrowthBonus() * 2);
+					staticChar.setSKLGrowth(staticChar.getSKLGrowth() - bloodData.holyBloodByType(majorBlood).getSKLGrowthBonus() * 2);
+					staticChar.setSPDGrowth(staticChar.getSPDGrowth() - bloodData.holyBloodByType(majorBlood).getSPDGrowthBonus() * 2);
+					staticChar.setDEFGrowth(staticChar.getDEFGrowth() - bloodData.holyBloodByType(majorBlood).getDEFGrowthBonus() * 2);
+					staticChar.setRESGrowth(staticChar.getRESGrowth() - bloodData.holyBloodByType(majorBlood).getRESGrowthBonus() * 2);
+					staticChar.setLCKGrowth(staticChar.getLCKGrowth() - bloodData.holyBloodByType(majorBlood).getLCKGrowthBonus() * 2);
 				}
 				
-				if (majorBlood != null) {
+				if (majorBlood != null && 
+						!restrictedBlood.contains(majorBlood) && 
+						new HashSet<FE4Data.HolyBlood>(Arrays.asList(targetClass.supportedHolyBlood())).contains(majorBlood)) { // Only do this for characters getting major blood that aren't restricted.
 					// See if this character has any chance for receiving an item specifically for him/her.
 					for (FE4Data.Character recipient : FE4Data.EventItemInventoryIDsByRecipient.keySet()) {
 						// They also can't be weakly linked to other characters (since we can potentially change a weapon that works for both units).
-						// This also only has a 50% chance of happening.
-						if (recipient.ID == fe4Char.ID && !FE4Data.WeaklyLinkedCharacters.containsKey(fe4Char) && rng.nextInt(2) == 0) {
+						// This also only has a 80% chance of happening.
+						if (recipient.ID == fe4Char.ID && !FE4Data.WeaklyLinkedCharacters.containsKey(fe4Char) && rng.nextInt(5) != 0) {
 							List<Integer> inventoryIDs = FE4Data.EventItemInventoryIDsByRecipient.get(recipient);
 							int inventoryID = inventoryIDs.get(inventoryIDs.size() - 1);
 							itemMap.setItemAtIndex(inventoryID, majorBlood.holyWeapon);
+							break;
 						}
 					}
 				}
@@ -240,10 +357,11 @@ public class FE4BloodRandomizer {
 				
 				if (bloodSet.isEmpty()) {
 					bloodSet = new HashSet<FE4Data.HolyBlood>(Arrays.asList(FE4Data.HolyBlood.values()));
+					bloodSet.remove(FE4Data.HolyBlood.NONE);
 					bloodSet.remove(minorBloodType);
 				}
 				List<FE4Data.HolyBlood> bloodList = new ArrayList<FE4Data.HolyBlood>(bloodSet);
-				
+				Collections.sort(bloodList, FE4Data.HolyBlood.defaultComparator);
 				FE4Data.HolyBlood selectedBlood = bloodList.get(rng.nextInt(bloodList.size()));
 				
 				FE4Data.HolyBloodSlot1 slot1 = FE4Data.HolyBloodSlot1.blood(selectedBlood, false);
@@ -252,6 +370,16 @@ public class FE4BloodRandomizer {
 				if (slot1 != null) { slot1Blood.add(slot1); }
 				if (slot2 != null) { slot2Blood.add(slot2); }
 				if (slot3 != null) { slot3Blood.add(slot3); }
+				
+				// Adjust personal growths downwards to compensate.
+				staticChar.setHPGrowth(staticChar.getHPGrowth() - bloodData.holyBloodByType(selectedBlood).getHPGrowthBonus());
+				staticChar.setSTRGrowth(staticChar.getSTRGrowth() - bloodData.holyBloodByType(selectedBlood).getSTRGrowthBonus());
+				staticChar.setMAGGrowth(staticChar.getMAGGrowth() - bloodData.holyBloodByType(selectedBlood).getMAGGrowthBonus());
+				staticChar.setSKLGrowth(staticChar.getSKLGrowth() - bloodData.holyBloodByType(selectedBlood).getSKLGrowthBonus());
+				staticChar.setSPDGrowth(staticChar.getSPDGrowth() - bloodData.holyBloodByType(selectedBlood).getSPDGrowthBonus());
+				staticChar.setDEFGrowth(staticChar.getDEFGrowth() - bloodData.holyBloodByType(selectedBlood).getDEFGrowthBonus());
+				staticChar.setRESGrowth(staticChar.getRESGrowth() - bloodData.holyBloodByType(selectedBlood).getRESGrowthBonus());
+				staticChar.setLCKGrowth(staticChar.getLCKGrowth() - bloodData.holyBloodByType(selectedBlood).getLCKGrowthBonus());
 			}
 			
 			for (FE4Data.Character linked : fe4Char.linkedCharacters()) {

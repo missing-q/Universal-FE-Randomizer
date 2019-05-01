@@ -1,12 +1,14 @@
 package random.gba.loader;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import fedata.gba.GBAFEClassData;
 import fedata.gba.general.GBAFEClass;
@@ -30,11 +32,32 @@ public class ClassDataLoader {
 		this.provider = provider;
 		
 		long baseAddress = FileReadHelper.readAddress(handler, provider.classDataTablePointer());
-		for (GBAFEClass charClass : provider.allClasses()) {
+		List<GBAFEClass> classList = new ArrayList<GBAFEClass>(Arrays.asList(provider.allClasses()));
+		List<GBAFEClass> unpromotedList = classList.stream().filter(charClass -> {
+			return charClass.isPromoted() == false;
+		}).collect(Collectors.toList());
+		List<GBAFEClass> remainderList = classList.stream().filter(charClass -> {
+			return unpromotedList.contains(charClass) == false;
+		}).collect(Collectors.toList());
+		
+		// Key: the promoted class, Value: The class object for the base class.
+		Map<GBAFEClass, GBAFEClassData> promotionMap = new HashMap<GBAFEClass, GBAFEClassData>();
+		
+		// This is done in two passes to satisfy FE6's lack of distinct promotion bonus (which is simply the delta between the two class bases.)
+		for (GBAFEClass charClass : unpromotedList) {
 			long offset = baseAddress + (charClass.getID() * provider.bytesPerClass());
 			byte[] classData = handler.readBytesAtOffset(offset, provider.bytesPerClass());
-			GBAFEClassData classObject = provider.classDataWithData(classData, offset);
+			GBAFEClassData classObject = provider.classDataWithData(classData, offset, null);
 			classMap.put(charClass.getID(), classObject);
+			promotionMap.put(provider.classWithID(classObject.getTargetPromotionID()), classObject);
+		}
+		
+		for (GBAFEClass charClass : remainderList) {
+			long offset = baseAddress + (charClass.getID() * provider.bytesPerClass());
+			byte[] classData = handler.readBytesAtOffset(offset, provider.bytesPerClass());
+			GBAFEClassData demoted = promotionMap.get(charClass);
+			GBAFEClassData classObject = provider.classDataWithData(classData, offset, demoted);
+			classMap.put(charClass.getID(), classObject); 
 		}
 		
 		provider.prepareForClassRandomization(classMap);
@@ -46,6 +69,10 @@ public class ClassDataLoader {
 	
 	public GBAFEClassData classForID(int classID) {
 		return classMap.get(classID);
+	}
+	
+	public String debugStringForClass(int classID) {
+		return provider.classWithID(classID).toString();
 	}
 	
 	public void commit() {
@@ -79,17 +106,18 @@ public class ClassDataLoader {
 		return charClass != null ? charClass.isFemale() : false;
 	}
 	
-	public GBAFEClassData[] potentialClasses(GBAFEClassData sourceClass, Boolean excludeLords, Boolean excludeThieves, Boolean excludeSource, Boolean requireAttack, Boolean requireRange, Boolean requireMelee, Boolean applyRestrictions, GBAFEClassData mustLoseToClass) {
-		return potentialClasses(sourceClass, excludeLords, excludeThieves, false, excludeSource, requireAttack, requireRange, requireMelee, applyRestrictions, mustLoseToClass);
+	public GBAFEClassData[] potentialClasses(GBAFEClassData sourceClass, Boolean excludeLords, Boolean excludeThieves, Boolean excludeSpecial, Boolean excludeSource, Boolean requireAttack, Boolean requireRange, Boolean requireMelee, Boolean applyRestrictions, GBAFEClassData mustLoseToClass) {
+		return potentialClasses(sourceClass, excludeLords, excludeThieves, excludeSpecial, false, excludeSource, requireAttack, requireRange, requireMelee, applyRestrictions, mustLoseToClass);
 	}
 	
-	public GBAFEClassData[] potentialClasses(GBAFEClassData sourceClass, Boolean excludeLords, Boolean excludeThieves, Boolean separateMonsters, Boolean excludeSource, Boolean requireAttack, Boolean requireRange, Boolean requireMelee, Boolean applyRestrictions, GBAFEClassData mustLoseToClass) {
+	public GBAFEClassData[] potentialClasses(GBAFEClassData sourceClass, Boolean excludeLords, Boolean excludeThieves, Boolean excludeSpecial, Boolean separateMonsters, Boolean excludeSource, Boolean requireAttack, Boolean requireRange, Boolean requireMelee, Boolean applyRestrictions, GBAFEClassData mustLoseToClass) {
 		GBAFEClass sourceCharClass = provider.classWithID(sourceClass.getID());
 		Set<GBAFEClass> targetClasses = null;
 		
 		Map<String, Boolean> options = new HashMap<String, Boolean>();
 		options.put(GBAFEClassProvider.optionKeyExcludeLords, excludeLords);
 		options.put(GBAFEClassProvider.optionKeyExcludeThieves, excludeThieves);
+		options.put(GBAFEClassProvider.optionKeyExcludeSpecial, excludeSpecial);
 		options.put(GBAFEClassProvider.optionKeySeparateMonsters, separateMonsters);
 		options.put(GBAFEClassProvider.optionKeyExcludeSource, excludeSource);
 		options.put(GBAFEClassProvider.optionKeyRequireAttack, requireAttack);
@@ -111,6 +139,59 @@ public class ClassDataLoader {
 	public Boolean isPromotedClass(int classID) {
 		GBAFEClass charClass = provider.classWithID(classID);
 		return charClass != null ? charClass.isPromoted() : false;
+	}
+	
+	public Boolean canClassDemote(int classID) {
+		GBAFEClass charClass = provider.classWithID(classID);
+		return charClass != null ? provider.canClassDemote(charClass) : false;
+	}
+	
+	public Boolean canClassPromote(int classID) {
+		GBAFEClass charClass = provider.classWithID(classID);
+		return charClass != null ? provider.canClassPromote(charClass) : false;
+	}
+	
+	public List<GBAFEClassData> demotionOptions(int classID) {
+		GBAFEClass charClass = provider.classWithID(classID);
+		if (charClass == null) { return new ArrayList<GBAFEClassData>(); }
+		GBAFEClass[] options = provider.demotedClass(charClass);
+		List<GBAFEClassData> result = new ArrayList<GBAFEClassData>();
+		for (GBAFEClass option : options) {
+			result.add(classMap.get(option.getID()));
+		}
+		return result;
+	}
+	
+	public List<GBAFEClassData> promotionOptions(int classID) {
+		GBAFEClass charClass = provider.classWithID(classID);
+		if (charClass == null) { return new ArrayList<GBAFEClassData>(); }
+		GBAFEClass[] options = provider.promotedClass(charClass);
+		List<GBAFEClassData> result = new ArrayList<GBAFEClassData>();
+		for (GBAFEClass option : options) {
+			result.add(classMap.get(option.getID()));
+		}
+		result.sort(new Comparator<GBAFEClassData>() {
+			@Override
+			public int compare(GBAFEClassData arg0, GBAFEClassData arg1) {
+				return Integer.compare(arg0.getID(), arg1.getID());
+			}
+		});
+		return result;
+	}
+	
+	public Boolean isFlying(int classID) {
+		GBAFEClass charClass = provider.classWithID(classID);
+		return charClass != null ? provider.isFlier(charClass) : false;
+	}
+	
+	public Boolean canSupportMelee(int classID) {
+		GBAFEClass charClass = provider.classWithID(classID);
+		return provider.meleeSupportedClasses().contains(charClass);
+	}
+	
+	public Boolean canSupportRange(int classID) {
+		GBAFEClass charClass = provider.classWithID(classID);
+		return provider.rangeSupportedClasses().contains(charClass);
 	}
 	
 	public Boolean isValidClass(int classID) {
@@ -146,7 +227,7 @@ public class ClassDataLoader {
 	
 	private void recordClass(RecordKeeper rk, GBAFEClassData charClass, Boolean isInitial, TextLoader textData) {
 		int nameIndex = charClass.getNameIndex();
-		String name = textData.getStringAtIndex(nameIndex).trim();
+		String name = textData.getStringAtIndex(nameIndex, true).trim();
 		
 		Boolean isFemale = isFemale(charClass.getID());
 		if (isFemale) { name = name + " (F)"; }

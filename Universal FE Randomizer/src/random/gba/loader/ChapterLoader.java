@@ -1,17 +1,26 @@
 package random.gba.loader;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import fedata.gba.GBAFEChapterData;
 import fedata.gba.GBAFEChapterItemData;
 import fedata.gba.GBAFEChapterUnitData;
 import fedata.gba.GBAFECharacterData;
 import fedata.gba.GBAFEClassData;
 import fedata.gba.GBAFEItemData;
+import fedata.gba.GBAFEWorldMapData;
+import fedata.gba.GBAFEWorldMapPortraitData;
+import fedata.gba.GBAFEWorldMapSpriteData;
 import fedata.gba.fe6.FE6Chapter;
 import fedata.gba.fe6.FE6Data;
+import fedata.gba.fe6.FE6WorldMapEvent;
 import fedata.gba.fe7.FE7Chapter;
 import fedata.gba.fe7.FE7Data;
+import fedata.gba.fe7.FE7WorldMapEvent;
 import fedata.gba.fe8.FE8Chapter;
 import fedata.gba.fe8.FE8Data;
+import fedata.gba.fe8.FE8WorldMapEvent;
 import fedata.gba.general.CharacterNudge;
 import fedata.general.FEBase;
 import io.FileHandler;
@@ -27,6 +36,8 @@ public class ChapterLoader {
 	private FEBase.GameType gameType;
 	
 	private GBAFEChapterData[] chapters;
+	private Map<Integer, GBAFEWorldMapData> worldMapEventsByChapterID = new HashMap<Integer, GBAFEWorldMapData>();
+	private Map<Integer, GBAFEChapterData> mappedChapters = new HashMap<Integer, GBAFEChapterData>();
 	
 	public static final String RecordKeeperCategoryKey = "Chapters";
 
@@ -41,15 +52,27 @@ public class ChapterLoader {
 				int i = 0;
 				long baseAddress = FileReadHelper.readAddress(handler, FE6Data.ChapterTablePointer);
 				for (FE6Data.ChapterPointer chapter : FE6Data.ChapterPointer.values()) {
+					int chapterID = chapter.chapterID;
 					int[] classBlacklist = new int[chapter.blacklistedClasses().length];
 					for (int index = 0; index < chapter.blacklistedClasses().length; index++) {
 						classBlacklist[index] = chapter.blacklistedClasses()[index].ID;
 					}
+					
+					CharacterNudge[] nudges = chapter.nudgesRequired();
 					long chapterOffset = baseAddress + (4 * chapter.chapterID);
 					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Loading " + chapter.toString());
-					FE6Chapter fe6Chapter = new FE6Chapter(handler, chapterOffset, chapter.isClassSafe(), chapter.shouldRemoveFightScenes(), classBlacklist, chapter.toString(), chapter.shouldBeEasy()); 
+					FE6Chapter fe6Chapter = new FE6Chapter(handler, chapterOffset, chapter.isClassSafe(), chapter.shouldRemoveFightScenes(), classBlacklist, chapter.toString(), chapter.shouldBeEasy(), nudges); 
 					chapters[i++] = fe6Chapter;
+					mappedChapters.put(chapterID, fe6Chapter);
 					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Chapter " + chapter.toString() + " loaded " + fe6Chapter.allUnits().length + " characters and " + fe6Chapter.allRewards().length + " rewards");
+					
+					if (chapter.hasWorldMapEvents()) {
+						long worldMapOffset = baseAddress + (4 * chapter.worldMapEvents);
+						DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Loading World Map Events for " + chapter.toString());
+						FE6WorldMapEvent fe6WorldMapEvent = new FE6WorldMapEvent(handler, worldMapOffset);
+						worldMapEventsByChapterID.put(chapterID, fe6WorldMapEvent);
+						DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Chapter " + chapter.toString() + " loaded " + fe6WorldMapEvent.allPortraits().length + " world map portraits.");
+					}
 				}
 				break;
 			case FE7:
@@ -58,6 +81,7 @@ public class ChapterLoader {
 				i = 0;
 				baseAddress = FileReadHelper.readAddress(handler, FE7Data.ChapterTablePointer);
 				for (FE7Data.ChapterPointer chapter : FE7Data.ChapterPointer.values()) {
+					int chapterID = chapter.chapterID;
 					int[] classBlacklist = new int[chapter.blacklistedClasses().length];
 					for (int index = 0; index < chapter.blacklistedClasses().length; index++) {
 						classBlacklist[index] = chapter.blacklistedClasses()[index].ID;
@@ -66,7 +90,18 @@ public class ChapterLoader {
 					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Loading " + chapter.toString());
 					FE7Chapter fe7Chapter = new FE7Chapter(handler, chapterOffset, chapter.isClassSafe(), chapter.shouldRemoveFightScenes(), classBlacklist, chapter.toString(), chapter.shouldBeEasy()); 
 					chapters[i++] = fe7Chapter;
+					mappedChapters.put(chapterID, fe7Chapter);
 					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Chapter " + chapter.toString() + " loaded " + fe7Chapter.allUnits().length + " characters and " + fe7Chapter.allRewards().length + " rewards");
+				}
+				
+				for (int j = 0; j < FE7Data.WorldMapEventCount; j++) {
+					long offset = FE7Data.WorldMapEventTableOffset + (j * FE7Data.WorldMapEventItemSize);
+					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Loading World Map Events from offset 0x" + Long.toHexString(offset));
+					FE7WorldMapEvent fe7WorldMapEvent = new FE7WorldMapEvent(handler, offset);
+					long dereferencedAddress = FileReadHelper.readAddress(handler, offset);
+					FE7Data.ChapterPointer chapter = FE7Data.ChapterPointer.chapterForWorldMapEventOffset(dereferencedAddress);
+					worldMapEventsByChapterID.put(chapter.chapterID, fe7WorldMapEvent);
+					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Loaded " + fe7WorldMapEvent.allPortraits().length + " world map portraits.");
 				}
 				break;
 			case FE8:
@@ -75,6 +110,7 @@ public class ChapterLoader {
 				i = 0;
 				baseAddress = FileReadHelper.readAddress(handler, FE8Data.ChapterTablePointer);
 				for (FE8Data.ChapterPointer chapter : FE8Data.ChapterPointer.values()) {
+					int chapterID = chapter.chapterID;
 					int[] classBlacklist = new int[chapter.blacklistedClasses().length];
 					for (int index = 0; index < chapter.blacklistedClasses().length; index++) {
 						classBlacklist[index] = chapter.blacklistedClasses()[index].ID;
@@ -94,7 +130,19 @@ public class ChapterLoader {
 					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Loading " + chapter.toString());
 					FE8Chapter fe8Chapter = new FE8Chapter(handler, chapterOffset, chapter.isClassSafe(), chapter.shouldRemoveFightScenes(), classBlacklist, chapter.toString(), chapter.shouldBeEasy(), trackedRewardRecipients, unarmedCharacterIDs, chapter.additionalUnitOffsets(), nudges); 
 					chapters[i++] = fe8Chapter;
+					mappedChapters.put(chapterID, fe8Chapter);
 					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Chapter " + chapter.toString() + " loaded " + fe8Chapter.allUnits().length + " characters and " + fe8Chapter.allRewards().length + " rewards");
+				}
+				
+				for (int j = 0; j < FE8Data.WorldMapEventCount; j++) {
+					long offset = FE8Data.WorldMapEventTableOffset + (j * FE8Data.WorldMapEventItemSize);
+					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Loading World Map Events from offset 0x" + Long.toHexString(offset));
+					FE8WorldMapEvent fe8WorldMapEvent = new FE8WorldMapEvent(handler, offset);
+					long dereferencedAddress = FileReadHelper.readAddress(handler, offset);
+					FE8Data.ChapterPointer chapter = FE8Data.ChapterPointer.chapterForWorldMapEventOffset(dereferencedAddress);
+					if (chapter == null) { continue; }
+					worldMapEventsByChapterID.put(chapter.chapterID, fe8WorldMapEvent);
+					DebugPrinter.log(DebugPrinter.Key.CHAPTER_LOADER, "Loaded " + fe8WorldMapEvent.allPortraits().length + " world map portraits.");
 				}
 				break; 
 			default:
@@ -113,6 +161,37 @@ public class ChapterLoader {
 		}
 	}
 	
+	public GBAFEWorldMapData[] allWorldMapEvents() {
+		switch (gameType) {
+		case FE6:
+		case FE7:
+		case FE8:
+			return worldMapEventsByChapterID.values().toArray(new GBAFEWorldMapData[worldMapEventsByChapterID.values().size()]);
+		default:
+			return new GBAFEWorldMapData[] {};
+		}
+	}
+	
+	public GBAFEWorldMapData worldMapEventsForChapterID(int chapterID) {
+		return worldMapEventsByChapterID.get(chapterID);
+	}
+	
+	public GBAFEChapterData chapterWithID(int chapterID) {
+		return mappedChapters.get(chapterID);
+	}
+	
+	public int getStartingLevelForCharacter(int characterID) {
+		for (GBAFEChapterData chapter : allChapters()) {
+			for (GBAFEChapterUnitData unit : chapter.allUnits()) {
+				if (unit.getCharacterNumber() == characterID) {
+					return unit.getStartingLevel();
+				}
+			}
+		}
+		
+		return 0;
+	}
+	
 	public void commit() {
 		for (GBAFEChapterData chapter : chapters) {
 			chapter.applyNudges();
@@ -127,6 +206,15 @@ public class ChapterLoader {
 			GBAFEChapterItemData[] targetedRewards = chapter.allTargetedRewards();
 			for (GBAFEChapterItemData item : targetedRewards) {
 				item.commitChanges();
+			}
+		}
+		
+		for (GBAFEWorldMapData worldMapEvent : worldMapEventsByChapterID.values()) {
+			for (GBAFEWorldMapPortraitData portrait : worldMapEvent.allPortraits()) {
+				portrait.commitChanges();
+			}
+			for (GBAFEWorldMapSpriteData sprite : worldMapEvent.allSprites()) {
+				sprite.commitChanges();
 			}
 		}
 	}
@@ -171,6 +259,25 @@ public class ChapterLoader {
 				}
 			}
 		}
+		
+		for (GBAFEWorldMapData worldMapEvent : worldMapEventsByChapterID.values()) {
+			for (GBAFEWorldMapPortraitData portrait : worldMapEvent.allPortraits()) {
+				portrait.commitChanges();
+				if (portrait.hasCommittedChanges()) {
+					byte[] portraitData = portrait.getData();
+					Diff portraitDiff = new Diff(portrait.getAddressOffset(), portraitData.length, portraitData, null);
+					compiler.addDiff(portraitDiff);
+				}
+			}
+			for (GBAFEWorldMapSpriteData sprite : worldMapEvent.allSprites()) {
+				sprite.commitChanges();
+				if (sprite.hasCommittedChanges()) {
+					byte[] spriteData = sprite.getData();
+					Diff spriteDiff = new Diff(sprite.getAddressOffset(), spriteData.length, spriteData, null);
+					compiler.addDiff(spriteDiff);
+				}
+			}
+		}
 	}
 	
 	public void recordChapters(RecordKeeper rk, Boolean isInitial, CharacterDataLoader charData, ClassDataLoader classData, ItemDataLoader itemData, TextLoader textData) {
@@ -207,9 +314,9 @@ public class ChapterLoader {
 			GBAFEItemData item = itemData.itemWithID(reward.getItemID());
 			
 			if (isInitial) {
-				rk.recordOriginalEntry(RecordKeeperCategoryKey, chapterName, key, (item != null ? textData.getStringAtIndex(item.getNameIndex()) : "Unknown (0x" + Integer.toHexString(reward.getItemID()).toUpperCase() + ")"));
+				rk.recordOriginalEntry(RecordKeeperCategoryKey, chapterName, key, (item != null ? textData.getStringAtIndex(item.getNameIndex(), true) : "Unknown (0x" + Integer.toHexString(reward.getItemID()).toUpperCase() + ")"));
 			} else {
-				rk.recordUpdatedEntry(RecordKeeperCategoryKey, chapterName, key, (item != null ? textData.getStringAtIndex(item.getNameIndex()) : "Unknown (0x" + Integer.toHexString(reward.getItemID()).toUpperCase() + ")"));
+				rk.recordUpdatedEntry(RecordKeeperCategoryKey, chapterName, key, (item != null ? textData.getStringAtIndex(item.getNameIndex(), true) : "Unknown (0x" + Integer.toHexString(reward.getItemID()).toUpperCase() + ")"));
 			}
 		}
 		
@@ -217,9 +324,9 @@ public class ChapterLoader {
 			String key = "Targeted Item";
 			GBAFEItemData item = itemData.itemWithID(targetedReward.getItemID());
 			if (isInitial) {
-				rk.recordOriginalEntry(RecordKeeperCategoryKey, chapterName, key, (item != null ? textData.getStringAtIndex(item.getNameIndex()) : "Unknown (0x" + Integer.toHexString(targetedReward.getItemID()).toUpperCase() + ")"));
+				rk.recordOriginalEntry(RecordKeeperCategoryKey, chapterName, key, (item != null ? textData.getStringAtIndex(item.getNameIndex(), true) : "Unknown (0x" + Integer.toHexString(targetedReward.getItemID()).toUpperCase() + ")"));
 			} else {
-				rk.recordUpdatedEntry(RecordKeeperCategoryKey, chapterName, key, (item != null ? textData.getStringAtIndex(item.getNameIndex()) : "Unknown (0x" + Integer.toHexString(targetedReward.getItemID()).toUpperCase() + ")"));
+				rk.recordUpdatedEntry(RecordKeeperCategoryKey, chapterName, key, (item != null ? textData.getStringAtIndex(item.getNameIndex(), true) : "Unknown (0x" + Integer.toHexString(targetedReward.getItemID()).toUpperCase() + ")"));
 			}
 		}
 	}
@@ -235,10 +342,10 @@ public class ChapterLoader {
 			sb.append("<tr><td>Character ID</td><td>0x" + Integer.toHexString(chapterUnit.getCharacterNumber()).toUpperCase() + "</td></tr>\n");
 		} else {
 			// This is a somewhat important character.
-			sb.append("<tr><td>Character ID</td><td>" + textData.getStringAtIndex(character.getNameIndex()) + "</td></tr>\n");
+			sb.append("<tr><td>Character ID</td><td>" + textData.getStringAtIndex(character.getNameIndex(), true) + "</td></tr>\n");
 		}
 		
-		sb.append("<tr><td>Class</td><td>" + (charClass != null ? textData.getStringAtIndex(charClass.getNameIndex()) + (classData.isFemale(charClass.getID()) ? " (F)" : "") : "Unknown (0x" + Integer.toHexString(chapterUnit.getStartingClass()) + ")") + "</td></tr>\n");
+		sb.append("<tr><td>Class</td><td>" + (charClass != null ? textData.getStringAtIndex(charClass.getNameIndex(), true) + (classData.isFemale(charClass.getID()) ? " (F)" : "") : "Unknown (0x" + Integer.toHexString(chapterUnit.getStartingClass()) + ")") + "</td></tr>\n");
 		sb.append("<tr><td>Loading Coordinates</td><td>(" + chapterUnit.getLoadingX() + ", " + chapterUnit.getLoadingY() + ")</td></tr>\n");
 		sb.append("<tr><td>Starting Coordinates</td><td>(" + chapterUnit.getStartingX() + ", " + chapterUnit.getStartingY() + ")</td></tr>\n");
 		GBAFEItemData item1 = itemData.itemWithID(chapterUnit.getItem1());
@@ -246,10 +353,10 @@ public class ChapterLoader {
 		GBAFEItemData item3 = itemData.itemWithID(chapterUnit.getItem3());
 		GBAFEItemData item4 = itemData.itemWithID(chapterUnit.getItem4());
 		
-		sb.append("<tr><td>Item 1</td><td>" + (item1 != null ? textData.getStringAtIndex(item1.getNameIndex()) : (chapterUnit.getItem1() != 0 ? "Unknown (0x" + Integer.toHexString(chapterUnit.getItem1()).toUpperCase() + ")" : "")) + "</td></tr>\n");
-		sb.append("<tr><td>Item 2</td><td>" + (item2 != null ? textData.getStringAtIndex(item2.getNameIndex()) : (chapterUnit.getItem2() != 0 ? "Unknown (0x" + Integer.toHexString(chapterUnit.getItem2()).toUpperCase() + ")" : "")) + "</td></tr>\n");
-		sb.append("<tr><td>Item 3</td><td>" + (item3 != null ? textData.getStringAtIndex(item3.getNameIndex()) : (chapterUnit.getItem3() != 0 ? "Unknown (0x" + Integer.toHexString(chapterUnit.getItem3()).toUpperCase() + ")" : "")) + "</td></tr>\n");
-		sb.append("<tr><td>Item 4</td><td>" + (item4 != null ? textData.getStringAtIndex(item4.getNameIndex()) : (chapterUnit.getItem4() != 0 ? "Unknown (0x" + Integer.toHexString(chapterUnit.getItem4()).toUpperCase() + ")" : "")) + "</td></tr>\n");
+		sb.append("<tr><td>Item 1</td><td>" + (item1 != null ? textData.getStringAtIndex(item1.getNameIndex(), true) : (chapterUnit.getItem1() != 0 ? "Unknown (0x" + Integer.toHexString(chapterUnit.getItem1()).toUpperCase() + ")" : "")) + "</td></tr>\n");
+		sb.append("<tr><td>Item 2</td><td>" + (item2 != null ? textData.getStringAtIndex(item2.getNameIndex(), true) : (chapterUnit.getItem2() != 0 ? "Unknown (0x" + Integer.toHexString(chapterUnit.getItem2()).toUpperCase() + ")" : "")) + "</td></tr>\n");
+		sb.append("<tr><td>Item 3</td><td>" + (item3 != null ? textData.getStringAtIndex(item3.getNameIndex(), true) : (chapterUnit.getItem3() != 0 ? "Unknown (0x" + Integer.toHexString(chapterUnit.getItem3()).toUpperCase() + ")" : "")) + "</td></tr>\n");
+		sb.append("<tr><td>Item 4</td><td>" + (item4 != null ? textData.getStringAtIndex(item4.getNameIndex(), true) : (chapterUnit.getItem4() != 0 ? "Unknown (0x" + Integer.toHexString(chapterUnit.getItem4()).toUpperCase() + ")" : "")) + "</td></tr>\n");
 		
 		sb.append("</table>\n");
 		return sb.toString();

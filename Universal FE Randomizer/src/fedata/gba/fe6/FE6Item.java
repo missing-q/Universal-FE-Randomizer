@@ -114,6 +114,24 @@ public class FE6Item implements GBAFEItemData {
 	public long getEffectivenessPointer() {
 		return (data[16] & 0xFF) | ((data[17] << 8) & 0xFF00) | ((data[18] << 16) & 0xFF0000) | ((data[19] << 24) & 0xFF000000) ;
 	}
+	
+	public void setStatBonusPointer(long address) {
+		byte[] pointer = WhyDoesJavaNotHaveThese.bytesFromAddress(address);
+		data[12] = pointer[0];
+		data[13] = pointer[1];
+		data[14] = pointer[2];
+		data[15] = pointer[3];
+		wasModified = true;
+	}
+	
+	public void setEffectivenessPointer(long address) {
+		byte[] pointer = WhyDoesJavaNotHaveThese.bytesFromAddress(address);
+		data[16] = pointer[0];
+		data[17] = pointer[1];
+		data[18] = pointer[2];
+		data[19] = pointer[3];
+		wasModified = true;
+	}
 
 	public int getDurability() {
 		return data[20] & 0xFF;
@@ -144,14 +162,15 @@ public class FE6Item implements GBAFEItemData {
 	}
 
 	public WeaponRank getWeaponRank() {
-		int rank = data[28] & 0xFF;
-		FE6WeaponRank weaponRank = FE6Data.Item.FE6WeaponRank.valueOf(rank);
-		if (weaponRank != null) {
-			return weaponRank.toGeneralRank();
+		// Check PRFs first, since Rapier, for example, is Rank E, despite being PRF.
+		FE6Data.Item weapon = FE6Data.Item.valueOf(getID());
+		if (weapon != null && FE6Data.Item.allPrfRank.contains(weapon)) {
+			return WeaponRank.PRF;
 		} else {
-			FE6Data.Item weapon = FE6Data.Item.valueOf(getID());
-			if (weapon != null && FE6Data.Item.allPrfRank.contains(weapon)) {
-				return WeaponRank.PRF;
+			int rank = data[28] & 0xFF;
+			FE6WeaponRank weaponRank = FE6Data.Item.FE6WeaponRank.valueOf(rank);
+			if (weaponRank != null) {
+				return weaponRank.toGeneralRank();
 			} else {
 				return WeaponRank.NONE;
 			}
@@ -232,10 +251,10 @@ public class FE6Item implements GBAFEItemData {
 		if (selectedEffect != WeaponEffects.NONE) {
 			String updatedDescription = ingameDescriptionString(itemData);
 			if (updatedDescription != null) {
-				textData.setStringAtIndex(getDescriptionIndex(), updatedDescription);
-				DebugPrinter.log(DebugPrinter.Key.WEAPONS, "Weapon " + textData.getStringAtIndex(getNameIndex()) + " is now " + updatedDescription);
+				textData.setStringAtIndex(getDescriptionIndex(), updatedDescription + "[X]");
+				DebugPrinter.log(DebugPrinter.Key.WEAPONS, "Weapon " + textData.getStringAtIndex(getNameIndex(), true) + " is now " + updatedDescription);
 			} else {
-				DebugPrinter.log(DebugPrinter.Key.WEAPONS, "Weapon " + textData.getStringAtIndex(getNameIndex()) + " has no effect.");
+				DebugPrinter.log(DebugPrinter.Key.WEAPONS, "Weapon " + textData.getStringAtIndex(getNameIndex(), true) + " has no effect.");
 			}
 		}
 	}
@@ -315,23 +334,13 @@ public class FE6Item implements GBAFEItemData {
 			long[] boosts = itemData.possibleStatBoostAddresses();
 			int randomIndex = rng.nextInt(boosts.length);
 			long selectedBoostAddress = boosts[randomIndex];
-			byte[] pointer = WhyDoesJavaNotHaveThese.bytesFromAddress(selectedBoostAddress);
-			data[12] = pointer[0];
-			data[13] = pointer[1];
-			data[14] = pointer[2];
-			data[15] = pointer[3];
-			wasModified = true;
+			setStatBonusPointer(selectedBoostAddress);
 			break;
 		case EFFECTIVENESS:
 			long[] effects = itemData.possibleEffectivenessAddresses();
 			randomIndex = rng.nextInt(effects.length);
 			long selectedEffectivenessAddress = effects[randomIndex];
-			pointer = WhyDoesJavaNotHaveThese.bytesFromAddress(selectedEffectivenessAddress);
-			data[16] = pointer[0];
-			data[17] = pointer[1];
-			data[18] = pointer[2];
-			data[19] = pointer[3];
-			wasModified = true;
+			setEffectivenessPointer(selectedEffectivenessAddress);
 			break;
 		case HIGH_CRITICAL:
 			int currentCritical = getCritical();

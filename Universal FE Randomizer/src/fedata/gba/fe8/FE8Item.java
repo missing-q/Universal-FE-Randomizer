@@ -118,6 +118,24 @@ public class FE8Item implements GBAFEItemData {
 	public long getEffectivenessPointer() {
 		return (data[16] & 0xFF) | ((data[17] << 8) & 0xFF00) | ((data[18] << 16) & 0xFF0000) | ((data[19] << 24) & 0xFF000000) ;
 	}
+	
+	public void setStatBonusPointer(long address) {
+		byte[] pointer = WhyDoesJavaNotHaveThese.bytesFromAddress(address);
+		data[12] = pointer[0];
+		data[13] = pointer[1];
+		data[14] = pointer[2];
+		data[15] = pointer[3];
+		wasModified = true;
+	}
+	
+	public void setEffectivenessPointer(long address) {
+		byte[] pointer = WhyDoesJavaNotHaveThese.bytesFromAddress(address);
+		data[16] = pointer[0];
+		data[17] = pointer[1];
+		data[18] = pointer[2];
+		data[19] = pointer[3];
+		wasModified = true;
+	}
 
 	public int getDurability() {
 		return data[20] & 0xFF;
@@ -236,10 +254,10 @@ public class FE8Item implements GBAFEItemData {
 		if (selectedEffect != WeaponEffects.NONE) {
 			String updatedDescription = ingameDescriptionString(itemData);
 			if (updatedDescription != null) {
-				textData.setStringAtIndex(getDescriptionIndex(), updatedDescription);
-				DebugPrinter.log(DebugPrinter.Key.WEAPONS, "Weapon " + textData.getStringAtIndex(getNameIndex()) + " is now " + updatedDescription);
+				textData.setStringAtIndex(getDescriptionIndex(), updatedDescription + "[X]");
+				DebugPrinter.log(DebugPrinter.Key.WEAPONS, "Weapon " + textData.getStringAtIndex(getNameIndex(), true) + " is now " + updatedDescription);
 			} else {
-				DebugPrinter.log(DebugPrinter.Key.WEAPONS, "Weapon " + textData.getStringAtIndex(getNameIndex()) + " has no effect.");
+				DebugPrinter.log(DebugPrinter.Key.WEAPONS, "Weapon " + textData.getStringAtIndex(getNameIndex(), true) + " has no effect.");
 			}
 		}
 	}
@@ -320,23 +338,13 @@ public class FE8Item implements GBAFEItemData {
 			long[] boosts = itemData.possibleStatBoostAddresses();
 			int randomIndex = rng.nextInt(boosts.length);
 			long selectedBoostAddress = boosts[randomIndex];
-			byte[] pointer = WhyDoesJavaNotHaveThese.bytesFromAddress(selectedBoostAddress);
-			data[12] = pointer[0];
-			data[13] = pointer[1];
-			data[14] = pointer[2];
-			data[15] = pointer[3];
-			wasModified = true;
+			setStatBonusPointer(selectedBoostAddress);
 			break;
 		case EFFECTIVENESS:
 			long[] effects = itemData.possibleEffectivenessAddresses();
 			randomIndex = rng.nextInt(effects.length);
 			long selectedEffectivenessAddress = effects[randomIndex];
-			pointer = WhyDoesJavaNotHaveThese.bytesFromAddress(selectedEffectivenessAddress);
-			data[16] = pointer[0];
-			data[17] = pointer[1];
-			data[18] = pointer[2];
-			data[19] = pointer[3];
-			wasModified = true;
+			setEffectivenessPointer(selectedEffectivenessAddress);
 			break;
 		case HIGH_CRITICAL:
 			int currentCritical = getCritical();
@@ -449,12 +457,12 @@ public class FE8Item implements GBAFEItemData {
 		if ((getAbility1() & Ability1Mask.MAGIC_DAMAGE.ID) != 0) { traitStrings.add("Targets Res"); shortStrings.put("Targets Res", "Magic"); }
 		
 		if ((getAbility2() & Ability2Mask.REVERSE_WEAPON_TRIANGLE.ID) != 0) {
-			if (getType() == WeaponType.SWORD) { traitStrings.add("Strong vs Lances"); shortStrings.put("Strong vs Lances", "Bests lances"); }
-			else if (getType() == WeaponType.LANCE) { traitStrings.add("Strong vs Axes"); shortStrings.put("Strong vs Axes", "Bests axes"); }
-			else if (getType() == WeaponType.AXE) { traitStrings.add("Strong vs Swords"); shortStrings.put("Strong vs Swords", "Bests Swords"); }
-			else if (getType() == WeaponType.ANIMA) { traitStrings.add("Strong vs Dark"); shortStrings.put("Strong vs Dark", "Bests Dark"); }
-			else if (getType() == WeaponType.LIGHT) { traitStrings.add("Strong vs Anima"); shortStrings.put("Strong vs Anima", "Bests Anima"); }
-			else if (getType() == WeaponType.DARK) { traitStrings.add("Strong vs Light"); shortStrings.put("Strong vs Light", "Bests Light"); }
+			if (getType() == WeaponType.SWORD) { traitStrings.add("Strong v. Lances"); shortStrings.put("Strong v. Lances", "Bests lances"); }
+			else if (getType() == WeaponType.LANCE) { traitStrings.add("Strong v. Axes"); shortStrings.put("Strong v. Axes", "Bests axes"); }
+			else if (getType() == WeaponType.AXE) { traitStrings.add("Strong v. Swords"); shortStrings.put("Strong v. Swords", "Bests Swords"); }
+			else if (getType() == WeaponType.ANIMA) { traitStrings.add("Strong v. Dark"); shortStrings.put("Strong v. Dark", "Bests Dark"); }
+			else if (getType() == WeaponType.LIGHT) { traitStrings.add("Strong v. Anima"); shortStrings.put("Strong v. Anima", "Bests Anima"); }
+			else if (getType() == WeaponType.DARK) { traitStrings.add("Strong v. Light"); shortStrings.put("Strong v. Light", "Bests Light"); }
 		}
 		
 		if (getWeaponEffect() == FE8Data.Item.WeaponEffect.POISON.ID) { traitStrings.add("Poisons on hit"); shortStrings.put("Poisons on hit", "Poison"); }
